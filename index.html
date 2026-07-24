@@ -1233,7 +1233,13 @@
 		    MOSAIC_HEIGHT,
 		    mapOptions
 		);
+
+		// Allow smaller, smoother zoom increments.
+		mosaicMap.options.zoomSnap = 0;
+		mosaicMap.options.zoomDelta = 0.25;
 		
+		// Larger number means the mouse wheel zooms more slowly.
+		mosaicMap.options.wheelPxPerZoomLevel = 120;
 		/*
 		 * All red duplicate circles are kept in this layer.
 		 * Clearing the layer removes every previous circle at once.
@@ -1319,21 +1325,21 @@
 		     * Delete this entire block if you want the map to remain at
 		     * its current zoom and position.
 		     */
-		    if (matchingLocations.length > 1) {
-		        var duplicateBounds = L.latLngBounds(matchingLocations);
+		    // if (matchingLocations.length > 1) {
+		    //     var duplicateBounds = L.latLngBounds(matchingLocations);
 		
-		        mosaicMap.fitBounds(
-		            duplicateBounds.pad(0.15),
-		            {
-		                animate: true,
-		                maxZoom: MOSAIC_NATIVE_ZOOM
-		            }
-		        );
-		    } else {
-		        mosaicMap.panTo(matchingLocations[0], {
-		            animate: true
-		        });
-		    }
+		    //     mosaicMap.fitBounds(
+		    //         duplicateBounds.pad(0.15),
+		    //         {
+		    //             animate: true,
+		    //             maxZoom: MOSAIC_NATIVE_ZOOM
+		    //         }
+		    //     );
+		    // } else {
+		    //     mosaicMap.panTo(matchingLocations[0], {
+		    //         animate: true
+		    //     });
+		    // }
 		};
 		
 		/*
