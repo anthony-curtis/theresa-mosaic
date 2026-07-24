@@ -1062,30 +1062,53 @@
 			[975,9075,300,150,450,100,5,"/Theresa Memorial/IMG_5566 copy.JPG","IMG_5566 copy","JPG"],
 		];
 
-        // Get the tile at the specified position x,y in pixels
-        var getTileObject = function (x,y) {
-            var l = tileArrays.length;
-            for (n=0; n<l; ++n) {
-                tileInfo = tileArrays[n];
-                if (tileInfo[0] <= x && tileInfo[0]+tileInfo[2] >= x && tileInfo[1] <= y && tileInfo[1]+tileInfo[3] >= y) {
-                    return { 
-                        tileLeft:tileInfo[0],
-                        tileTop:tileInfo[1],
-                        tileWidth:tileInfo[2],
-                        tileHeight:tileInfo[3],
-                        tileRight:tileInfo[0]+tileInfo[1],
-                        tileBottom:tileInfo[2]+tileInfo[3],
-                        tileNr:tileInfo[4],
-                        imageNr:tileInfo[5],
-                        imageUsageCount:tileInfo[6],
-                        imageUrl:tileInfo[7],
-                        imageName:tileInfo[8],
-                        imageExtension:tileInfo[9],
-                    };
-                }
-            }
-            return null; // not found
-        }
+        // Get the tile at the specified position x,y in mosaic pixels
+		var getTileObject = function (x, y) {
+		    var tileCount = tileArrays.length;
+		
+		    for (var n = 0; n < tileCount; ++n) {
+		        var tileInfo = tileArrays[n];
+		
+		        var tileLeft = tileInfo[0];
+		        var tileTop = tileInfo[1];
+		        var tileWidth = tileInfo[2];
+		        var tileHeight = tileInfo[3];
+		        var tileRight = tileLeft + tileWidth;
+		        var tileBottom = tileTop + tileHeight;
+		
+		        /*
+		         * Use < for the right and bottom edges.
+		         * This prevents a coordinate directly on a shared boundary
+		         * from matching two neighboring tiles.
+		         */
+		        if (
+		            tileLeft <= x &&
+		            x < tileRight &&
+		            tileTop <= y &&
+		            y < tileBottom
+		        ) {
+		            return {
+		                tileLeft: tileLeft,
+		                tileTop: tileTop,
+		                tileWidth: tileWidth,
+		                tileHeight: tileHeight,
+		
+		                // Corrected calculations
+		                tileRight: tileRight,
+		                tileBottom: tileBottom,
+		
+		                tileNr: tileInfo[4],
+		                imageNr: tileInfo[5],
+		                imageUsageCount: tileInfo[6],
+		                imageUrl: tileInfo[7],
+		                imageName: tileInfo[8],
+		                imageExtension: tileInfo[9]
+		            };
+		        }
+		    }
+		
+		    return null;
+		};
 
         var showPopUpWindow = function(popUpText, callback) {
             callback.showPopUp({maxWidth:300, popUpText:popUpText}, callback.args);
@@ -1184,14 +1207,166 @@
             panInertiaDeceleration: null, // can be null or a value in pixels/second.
         };
 
-        // Show the Mosaic
-        var mosaicMap = ShowAndreaMosaic(
+        // ------------------------------------------------------------
+		// Show the mosaic and highlight every use of an image on
+		// right-click/long-press.
+		// ------------------------------------------------------------
+		
+		var MOSAIC_WIDTH = 7200;
+		var MOSAIC_HEIGHT = 9225;
+		
+		/*
+		 * This must match the native mosaic zoom calculation used inside
+		 * app/leafletzoom.js.
+		 */
+		var MOSAIC_NATIVE_ZOOM = Math.ceil(
+		    Math.log2(Math.max(MOSAIC_WIDTH, MOSAIC_HEIGHT) / 256)
+		);
+		
+		// ShowAndreaMosaic now returns the Leaflet map because of the
+		// small change made in app/leafletzoom.js.
+		var mosaicMap = ShowAndreaMosaic(
 		    'AndreaMosaic',
 		    'mosaic/',
-		    7200,
-		    9225,
+		    MOSAIC_WIDTH,
+		    MOSAIC_HEIGHT,
 		    mapOptions
 		);
+		
+		/*
+		 * All red duplicate circles are kept in this layer.
+		 * Clearing the layer removes every previous circle at once.
+		 */
+		var duplicateHighlightLayer = L.layerGroup().addTo(mosaicMap);
+		
+		/*
+		 * Build an index of all tiles grouped by imageNr.
+		 *
+		 * tileInfo indexes:
+		 * 0 = tile x
+		 * 1 = tile y
+		 * 2 = tile width
+		 * 3 = tile height
+		 * 4 = tileNr
+		 * 5 = imageNr
+		 */
+		var tilesByImageNr = new Map();
+		
+		tileArrays.forEach(function (tileInfo) {
+		    var imageNr = tileInfo[5];
+		
+		    if (!tilesByImageNr.has(imageNr)) {
+		        tilesByImageNr.set(imageNr, []);
+		    }
+		
+		    tilesByImageNr.get(imageNr).push(tileInfo);
+		});
+		
+		/*
+		 * Convert the center of a tile from mosaic pixel coordinates
+		 * into a Leaflet LatLng coordinate.
+		 */
+		var getTileCenterLatLng = function (tileInfo) {
+		    var centerX = tileInfo[0] + tileInfo[2] / 2;
+		    var centerY = tileInfo[1] + tileInfo[3] / 2;
+		
+		    return mosaicMap.unproject(
+		        [centerX, centerY],
+		        MOSAIC_NATIVE_ZOOM
+		    );
+		};
+		
+		/*
+		 * Draw one red circle over every tile that uses the selected
+		 * imageNr.
+		 */
+		var highlightAllUsesOfImage = function (imageNr) {
+		    // Remove circles from the previous selection.
+		    duplicateHighlightLayer.clearLayers();
+		
+		    var matchingTiles = tilesByImageNr.get(imageNr) || [];
+		
+		    if (matchingTiles.length === 0) {
+		        return;
+		    }
+		
+		    var matchingLocations = [];
+		
+		    matchingTiles.forEach(function (tileInfo) {
+		        var tileCenter = getTileCenterLatLng(tileInfo);
+		
+		        matchingLocations.push(tileCenter);
+		
+		        L.circleMarker(tileCenter, {
+		            radius: 16,
+		            color: '#ff0000',
+		            weight: 4,
+		            opacity: 1,
+		            fill: false,
+		
+		            /*
+		             * The circles are visual only. They will not intercept
+		             * mouse or touchscreen events.
+		             */
+		            interactive: false
+		        }).addTo(duplicateHighlightLayer);
+		    });
+		
+		    /*
+		     * Zoom/pan so every occurrence can be seen.
+		     *
+		     * Delete this entire block if you want the map to remain at
+		     * its current zoom and position.
+		     */
+		    if (matchingLocations.length > 1) {
+		        var duplicateBounds = L.latLngBounds(matchingLocations);
+		
+		        mosaicMap.fitBounds(
+		            duplicateBounds.pad(0.15),
+		            {
+		                animate: true,
+		                maxZoom: MOSAIC_NATIVE_ZOOM
+		            }
+		        );
+		    } else {
+		        mosaicMap.panTo(matchingLocations[0], {
+		            animate: true
+		        });
+		    }
+		};
+		
+		/*
+		 * Right-click on desktop or long-press on a touchscreen.
+		 *
+		 * leafletzoom.js will still run its existing contextmenu handler
+		 * and show the normal image-information popup. This additional
+		 * handler draws the duplicate circles.
+		 */
+		mosaicMap.on('contextmenu', function (event) {
+		    var mosaicPoint = mosaicMap.project(
+		        event.latlng,
+		        MOSAIC_NATIVE_ZOOM
+		    );
+		
+		    var clickedTile = getTileObject(
+		        Math.floor(mosaicPoint.x),
+		        Math.floor(mosaicPoint.y)
+		    );
+		
+		    if (clickedTile === null) {
+		        duplicateHighlightLayer.clearLayers();
+		        return;
+		    }
+		
+		    highlightAllUsesOfImage(clickedTile.imageNr);
+		});
+		
+		/*
+		 * Clear all red circles with a normal left-click/tap.
+		 */
+		mosaicMap.on('click', function () {
+		    duplicateHighlightLayer.clearLayers();
+		});
     </script>
 </body>
 </html>
